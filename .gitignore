@@ -37,3 +37,21 @@ src/H5config.h.in
 /.classpath
 /CMakeUserPresets.json
 HDF5Examples/CMakeUserPresets.json
+
+# Compilation outputs
+config.log
+config.lt
+config.status
+Makefile
+bin/Makefile
+c++/Makefile
+c++/src/h5c++
+*.o
+*.a
+*.so
+*.so.*
+*.lo
+*.la
+*.Plo
+*.Po
+*.mod
