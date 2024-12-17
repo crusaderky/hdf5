@@ -19,6 +19,7 @@
 /***********/
 /* Headers */
 /***********/
+#include <time.h>
 #include "H5private.h"   /* Generic Functions                        */
 #include "H5Dpkg.h"      /* Datasets                                 */
 #include "H5Eprivate.h"  /* Error handling                           */
@@ -578,6 +579,11 @@ H5D__layout_oh_read(H5D_t *dataset, hid_t dapl_id, H5P_genplist_t *plist)
 
     FUNC_ENTER_PACKAGE
 
+    struct timespec start0, end0;
+    struct timespec start1, end1;
+    clock_gettime(CLOCK_MONOTONIC, &start0);
+    long elapsed_ns;
+
     /* Sanity checking */
     assert(dataset);
     assert(plist);
@@ -586,6 +592,8 @@ H5D__layout_oh_read(H5D_t *dataset, hid_t dapl_id, H5P_genplist_t *plist)
     if ((msg_exists = H5O_msg_exists(&(dataset->oloc), H5O_PLINE_ID)) < 0)
         HGOTO_ERROR(H5E_DATASET, H5E_CANTGET, FAIL, "can't check if message exists");
     if (msg_exists) {
+        clock_gettime(CLOCK_MONOTONIC, &start1);
+
         /* Retrieve the I/O pipeline message */
         if (NULL == H5O_msg_read(&(dataset->oloc), H5O_PLINE_ID, &dataset->shared->dcpl_cache.pline))
             HGOTO_ERROR(H5E_DATASET, H5E_CANTGET, FAIL, "can't retrieve message");
@@ -593,8 +601,13 @@ H5D__layout_oh_read(H5D_t *dataset, hid_t dapl_id, H5P_genplist_t *plist)
         /* Set the I/O pipeline info in the property list */
         if (H5P_set(plist, H5O_CRT_PIPELINE_NAME, &dataset->shared->dcpl_cache.pline) < 0)
             HGOTO_ERROR(H5E_DATASET, H5E_CANTSET, FAIL, "can't set pipeline");
+
+        clock_gettime(CLOCK_MONOTONIC, &end1);
+        elapsed_ns = (end1.tv_sec - start1.tv_sec) * 1000000000L + (end1.tv_nsec - start1.tv_nsec);
+        printf("msg_read I/O pipeline,%ld\n", elapsed_ns);
     } /* end if */
 
+    clock_gettime(CLOCK_MONOTONIC, &start1);
     /*
      * Get the raw data layout info.  It's actually stored in two locations:
      * the storage message of the dataset (dataset->storage) and certain
@@ -603,12 +616,18 @@ H5D__layout_oh_read(H5D_t *dataset, hid_t dapl_id, H5P_genplist_t *plist)
      */
     if (NULL == H5O_msg_read(&(dataset->oloc), H5O_LAYOUT_ID, &(dataset->shared->layout)))
         HGOTO_ERROR(H5E_DATASET, H5E_CANTINIT, FAIL, "unable to read data layout message");
+    clock_gettime(CLOCK_MONOTONIC, &end1);
+    elapsed_ns = (end1.tv_sec - start1.tv_sec) * 1000000000L + (end1.tv_nsec - start1.tv_nsec);
+    printf("msg_read raw data layout info,%ld\n", elapsed_ns);
+
     layout_copied = true;
 
     /* Check for external file list message (which might not exist) */
     if ((msg_exists = H5O_msg_exists(&(dataset->oloc), H5O_EFL_ID)) < 0)
         HGOTO_ERROR(H5E_DATASET, H5E_CANTGET, FAIL, "can't check if message exists");
     if (msg_exists) {
+        clock_gettime(CLOCK_MONOTONIC, &start1);
+
         /* Retrieve the EFL  message */
         if (NULL == H5O_msg_read(&(dataset->oloc), H5O_EFL_ID, &dataset->shared->dcpl_cache.efl))
             HGOTO_ERROR(H5E_DATASET, H5E_CANTGET, FAIL, "can't retrieve message");
@@ -620,6 +639,10 @@ H5D__layout_oh_read(H5D_t *dataset, hid_t dapl_id, H5P_genplist_t *plist)
 
         /* Set the dataset's I/O operations */
         dataset->shared->layout.ops = H5D_LOPS_EFL;
+
+        clock_gettime(CLOCK_MONOTONIC, &end1);
+        elapsed_ns = (end1.tv_sec - start1.tv_sec) * 1000000000L + (end1.tv_nsec - start1.tv_nsec);
+        printf("msg_read file list,%ld\n", elapsed_ns);
     } /* end if */
 
     /* Sanity check that the layout operations are set up */
@@ -634,14 +657,24 @@ H5D__layout_oh_read(H5D_t *dataset, hid_t dapl_id, H5P_genplist_t *plist)
     if (H5D_CHUNKED == dataset->shared->layout.type)
         dataset->shared->layout.u.chunk.ndims--;
 
+    clock_gettime(CLOCK_MONOTONIC, &start1);
+
     /* Copy layout to the DCPL */
     if (H5P_set(plist, H5D_CRT_LAYOUT_NAME, &dataset->shared->layout) < 0)
         HGOTO_ERROR(H5E_DATASET, H5E_CANTSET, FAIL, "can't set layout");
+
+    clock_gettime(CLOCK_MONOTONIC, &end1);
+    elapsed_ns = (end1.tv_sec - start1.tv_sec) * 1000000000L + (end1.tv_nsec - start1.tv_nsec);
+    printf("Copy layout to the DCPL,%ld\n", elapsed_ns);
 
     /* Set chunk sizes */
     if (H5D_CHUNKED == dataset->shared->layout.type)
         if (H5D__chunk_set_sizes(dataset) < 0)
             HGOTO_ERROR(H5E_DATASET, H5E_BADVALUE, FAIL, "unable to set chunk sizes");
+
+    clock_gettime(CLOCK_MONOTONIC, &end0);
+    elapsed_ns = (end0.tv_sec - start0.tv_sec) * 1000000000L + (end0.tv_nsec - start0.tv_nsec);
+    printf("H5D__layout_oh_read,%ld\n", elapsed_ns);
 
 done:
     if (ret_value < 0) {
