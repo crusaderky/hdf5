@@ -40,7 +40,8 @@ static int  get_hyperslab(hid_t dcpl_id, int rank_dset, const hsize_t dims_dset[
                           hsize_t dims_hslab[], hsize_t *hslab_nbytes_p);
 static void print_dataset_info(hid_t dcpl_id, char *objname, double per, int pr, pack_opt_t *options,
                                double read_time, double write_time);
-static int  do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, hid_t *dsets_in, hid_t *dsets_out, pack_opt_t *options);
+static int  do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, hid_t *dsets_in, hid_t *dsets_out,
+                            pack_opt_t *options);
 static int  copy_user_block(const char *infile, const char *outfile, hsize_t size);
 #if defined(H5REPACK_DEBUG_USER_BLOCK)
 static void print_user_block(const char *filename, hid_t fid);
@@ -58,25 +59,25 @@ static void print_user_block(const char *filename, hid_t fid);
 int
 copy_objects(const char *fnamein, const char *fnameout, pack_opt_t *options)
 {
-    hid_t                 fidin   = H5I_INVALID_HID;
-    hid_t                 fidout  = H5I_INVALID_HID;
-    hid_t                 fcpl_in = H5I_INVALID_HID; /* file creation property list ID for input file */
-    hid_t                 grp_in  = H5I_INVALID_HID; /* group ID */
-    hid_t                 gcpl_in = H5I_INVALID_HID; /* group creation property list */
-    hid_t                 fcpl    = H5P_DEFAULT;     /* file creation property list ID */
-    trav_table_t         *travt   = NULL;
-    hid_t                *dsets_in = NULL;   /* array of references to open input datasets, matching travt */
-    hid_t                *dsets_out = NULL;  /* array of references to open output datasets, matching travt */
-    hsize_t               ub_size = 0;     /* size of user block */
-    H5F_fspace_strategy_t set_strategy;    /* Strategy to be set in output file */
-    bool                  set_persist;     /* Persist free-space status to be set in output file */
-    hsize_t               set_threshold;   /* Free-space section threshold to be set in output file */
-    hsize_t               set_pagesize;    /* File space page size to be set in output file */
-    H5F_fspace_strategy_t in_strategy;     /* Strategy from input file */
-    bool                  in_persist;      /* Persist free-space status from input file */
-    hsize_t               in_threshold;    /* Free-space section threshold from input file */
-    hsize_t               in_pagesize;     /* File space page size from input file */
-    unsigned              crt_order_flags; /* group creation order flag */
+    hid_t                 fidin     = H5I_INVALID_HID;
+    hid_t                 fidout    = H5I_INVALID_HID;
+    hid_t                 fcpl_in   = H5I_INVALID_HID; /* file creation property list ID for input file */
+    hid_t                 grp_in    = H5I_INVALID_HID; /* group ID */
+    hid_t                 gcpl_in   = H5I_INVALID_HID; /* group creation property list */
+    hid_t                 fcpl      = H5P_DEFAULT;     /* file creation property list ID */
+    trav_table_t         *travt     = NULL;
+    hid_t                *dsets_in  = NULL; /* array of references to open input datasets, matching travt */
+    hid_t                *dsets_out = NULL; /* array of references to open output datasets, matching travt */
+    hsize_t               ub_size   = 0;    /* size of user block */
+    H5F_fspace_strategy_t set_strategy;     /* Strategy to be set in output file */
+    bool                  set_persist;      /* Persist free-space status to be set in output file */
+    hsize_t               set_threshold;    /* Free-space section threshold to be set in output file */
+    hsize_t               set_pagesize;     /* File space page size to be set in output file */
+    H5F_fspace_strategy_t in_strategy;      /* Strategy from input file */
+    bool                  in_persist;       /* Persist free-space status from input file */
+    hsize_t               in_threshold;     /* Free-space section threshold from input file */
+    hsize_t               in_pagesize;      /* File space page size from input file */
+    unsigned              crt_order_flags;  /* group creation order flag */
     int                   ret_value = 0;
 
     /*-------------------------------------------------------------------------
@@ -351,7 +352,7 @@ copy_objects(const char *fnamein, const char *fnameout, pack_opt_t *options)
             if (dsets_in[i] != H5I_INVALID_HID) {
                 if (H5Dclose(dsets_in[i]) < 0)
                     H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
-                dsets_in[i]  = H5I_INVALID_HID;
+                dsets_in[i] = H5I_INVALID_HID;
             }
             if (dsets_out[i] != H5I_INVALID_HID) {
                 if (H5Dclose(dsets_out[i]) < 0)
@@ -409,13 +410,19 @@ done:
     if (-1 == ret_value) {
         if (travt && dsets_in) {
             for (unsigned i = 0; i < travt->nobjs; i++) {
-                H5E_BEGIN_TRY { H5Dclose(dsets_in[i]); }
+                H5E_BEGIN_TRY
+                {
+                    H5Dclose(dsets_in[i]);
+                }
             }
             free(dsets_in);
         }
         if (travt && dsets_out) {
             for (unsigned i = 0; i < travt->nobjs; i++) {
-                H5E_BEGIN_TRY { H5Dclose(dsets_out[i]); }
+                H5E_BEGIN_TRY
+                {
+                    H5Dclose(dsets_out[i]);
+                }
             }
             free(dsets_out);
         }
@@ -650,13 +657,8 @@ done:
  */
 
 int
-do_copy_objects(
-    hid_t fidin, 
-    hid_t fidout, 
-    trav_table_t *travt, 
-    hid_t * dsets_in, 
-    hid_t *dsets_out, 
-    pack_opt_t *options   /* repack options */
+do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, hid_t *dsets_in, hid_t *dsets_out,
+                pack_opt_t *options /* repack options */
 )
 {
     hid_t              grp_in        = H5I_INVALID_HID; /* group ID */
@@ -849,7 +851,7 @@ do_copy_objects(
 
                     /* early detection of references */
                     if ((dset_in = ensure_dataset_open(fidin, travt, dsets_in, i)) < 0)
-                        H5TOOLS_GOTO_ERROR((-1), "ensure_dataset_open failed");                        
+                        H5TOOLS_GOTO_ERROR((-1), "ensure_dataset_open failed");
                     if ((ftype_id = H5Dget_type(dset_in)) < 0)
                         H5TOOLS_GOTO_ERROR((-1), "H5Dget_type failed");
                     if (H5T_REFERENCE == H5Tget_class(ftype_id))

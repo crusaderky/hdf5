@@ -35,13 +35,8 @@ static herr_t update_ref_value(hid_t obj_id, H5R_type_t ref_type, void *ref_in, 
  */
 
 int
-do_copy_refobjs(
-    hid_t fidin,
-    hid_t fidout,
-    trav_table_t *travt,
-    hid_t *dsets_in,
-    hid_t *dsets_out,
-    pack_opt_t *options  /* repack options */
+do_copy_refobjs(hid_t fidin, hid_t fidout, trav_table_t *travt, hid_t *dsets_in, hid_t *dsets_out,
+                pack_opt_t *options /* repack options */
 )
 {
     hid_t        grp_in   = H5I_INVALID_HID; /* read group ID */
