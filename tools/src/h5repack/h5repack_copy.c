@@ -40,7 +40,7 @@ static int  get_hyperslab(hid_t dcpl_id, int rank_dset, const hsize_t dims_dset[
                           hsize_t dims_hslab[], hsize_t *hslab_nbytes_p);
 static void print_dataset_info(hid_t dcpl_id, char *objname, double per, int pr, pack_opt_t *options,
                                double read_time, double write_time);
-static int  do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *options);
+static int  do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, hid_t *dsets_in, hid_t *dsets_out, pack_opt_t *options);
 static int  copy_user_block(const char *infile, const char *outfile, hsize_t size);
 #if defined(H5REPACK_DEBUG_USER_BLOCK)
 static void print_user_block(const char *filename, hid_t fid);
@@ -65,6 +65,8 @@ copy_objects(const char *fnamein, const char *fnameout, pack_opt_t *options)
     hid_t                 gcpl_in = H5I_INVALID_HID; /* group creation property list */
     hid_t                 fcpl    = H5P_DEFAULT;     /* file creation property list ID */
     trav_table_t         *travt   = NULL;
+    hid_t                *dsets_in = NULL;   /* array of references to open input datasets, matching travt */
+    hid_t                *dsets_out = NULL;  /* array of references to open output datasets, matching travt */
     hsize_t               ub_size = 0;     /* size of user block */
     H5F_fspace_strategy_t set_strategy;    /* Strategy to be set in output file */
     bool                  set_persist;     /* Persist free-space status to be set in output file */
@@ -319,11 +321,20 @@ copy_objects(const char *fnamein, const char *fnameout, pack_opt_t *options)
         if (h5trav_gettable(fidin, travt) < 0)
             H5TOOLS_GOTO_ERROR((-1), "h5trav_gettable failed");
 
+        if (dsets_in = malloc(travt->nobjs * sizeof(hid_t)) == NULL)
+            H5TOOLS_GOTO_ERROR((-1), "malloc failed");
+        if (dsets_out = malloc(travt->nobjs * sizeof(hid_t)) == NULL)
+            H5TOOLS_GOTO_ERROR((-1), "malloc failed");
+        for (unsigned i = 0; i < travt->nobjs; i++) {
+            dsets_in[i]  = H5I_INVALID_HID;
+            dsets_out[i] = H5I_INVALID_HID;
+        }
+
         /*-------------------------------------------------------------------------
          * do the copy
          *-------------------------------------------------------------------------
          */
-        if (do_copy_objects(fidin, fidout, travt, options) < 0)
+        if (do_copy_objects(fidin, fidout, travt, dsets_in, dsets_out, options) < 0)
             H5TOOLS_GOTO_ERROR((-1), "do_copy_objects from <%s> could not copy data to <%s>", fnamein,
                                fnameout);
 
@@ -332,9 +343,26 @@ copy_objects(const char *fnamein, const char *fnameout, pack_opt_t *options)
          * and create hard links
          *-------------------------------------------------------------------------
          */
-        if (do_copy_refobjs(fidin, fidout, travt, options) < 0)
+        if (do_copy_refobjs(fidin, fidout, travt, dsets_in, dsets_out, options) < 0)
             H5TOOLS_GOTO_ERROR((-1), "do_copy_refobjs from <%s> could not copy data to <%s>", fnamein,
                                fnameout);
+
+        for (unsigned i = 0; i < travt->nobjs; i++) {
+            if (dsets_in[i] != H5I_INVALID_HID) {
+                if (H5Dclose(dsets_in[i]) < 0)
+                    H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
+                dsets_in[i]  = H5I_INVALID_HID;
+            }
+            if (dsets_out[i] != H5I_INVALID_HID) {
+                if (H5Dclose(dsets_out[i]) < 0)
+                    H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
+                dsets_out[i] = H5I_INVALID_HID;
+            }
+        }
+        free(dsets_in);
+        dsets_in = NULL;
+        free(dsets_out);
+        dsets_out = NULL;
     }
 
     /*-------------------------------------------------------------------------
@@ -379,6 +407,19 @@ copy_objects(const char *fnamein, const char *fnameout, pack_opt_t *options)
 
 done:
     if (-1 == ret_value) {
+        if (travt && dsets_in) {
+            for (unsigned i = 0; i < travt->nobjs; i++) {
+                H5E_BEGIN_TRY { H5Dclose(dsets_in[i]); }
+            }
+            free(dsets_in);
+        }
+        if (travt && dsets_out) {
+            for (unsigned i = 0; i < travt->nobjs; i++) {
+                H5E_BEGIN_TRY { H5Dclose(dsets_out[i]); }
+            }
+            free(dsets_out);
+        }
+
         H5E_BEGIN_TRY
         {
             H5Pclose(fcpl);
@@ -609,7 +650,14 @@ done:
  */
 
 int
-do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *options) /* repack options */
+do_copy_objects(
+    hid_t fidin, 
+    hid_t fidout, 
+    trav_table_t *travt, 
+    hid_t * dsets_in, 
+    hid_t *dsets_out, 
+    pack_opt_t *options   /* repack options */
+)
 {
     hid_t              grp_in        = H5I_INVALID_HID; /* group ID */
     hid_t              grp_out       = H5I_INVALID_HID; /* group ID */
@@ -800,8 +848,8 @@ do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
                     }
 
                     /* early detection of references */
-                    if ((dset_in = H5Dopen2(fidin, travt->objs[i].name, H5P_DEFAULT)) < 0)
-                        H5TOOLS_GOTO_ERROR((-1), "H5Dopen2 failed");
+                    if ((dset_in = ensure_dataset_open(fidin, travt, dsets_in, i)) < 0)
+                        H5TOOLS_GOTO_ERROR((-1), "ensure_dataset_open failed");                        
                     if ((ftype_id = H5Dget_type(dset_in)) < 0)
                         H5TOOLS_GOTO_ERROR((-1), "H5Dget_type failed");
                     if (H5T_REFERENCE == H5Tget_class(ftype_id))
@@ -825,8 +873,6 @@ do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
 
                     if (H5Tclose(ftype_id) < 0)
                         H5TOOLS_GOTO_ERROR((-1), "H5Tclose failed");
-                    if (H5Dclose(dset_in) < 0)
-                        H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
 
                     /*-------------------------------------------------------------------------
                      * check if we should use H5Ocopy or not
@@ -882,8 +928,8 @@ do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
                     if (!use_h5ocopy) {
                         int j;
 
-                        if ((dset_in = H5Dopen2(fidin, travt->objs[i].name, H5P_DEFAULT)) < 0)
-                            H5TOOLS_GOTO_ERROR((-1), "H5Dopen2 failed");
+                        if ((dset_in = ensure_dataset_open(fidin, travt, dsets_in, i)) < 0)
+                            H5TOOLS_GOTO_ERROR((-1), "ensure_dataset_open failed");
                         if ((f_space_id = H5Dget_space(dset_in)) < 0)
                             H5TOOLS_GOTO_ERROR((-1), "H5Dget_space failed");
                         if ((ftype_id = H5Dget_type(dset_in)) < 0)
@@ -1252,8 +1298,6 @@ do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
                                 if (copy_attr(dset_in, dset_out, &named_dt_head, travt, options) < 0)
                                     H5TOOLS_GOTO_ERROR((-1), "copy_attr failed");
 
-                                if (H5Dclose(dset_out) < 0)
-                                    H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
                             } /* end if not a reference */
                         }     /* end if h5tools_canreadf (filter availability check) */
 
@@ -1271,8 +1315,6 @@ do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
                             H5TOOLS_GOTO_ERROR((-1), "H5Pclose failed");
                         if (H5Sclose(f_space_id) < 0)
                             H5TOOLS_GOTO_ERROR((-1), "H5Sclose failed");
-                        if (H5Dclose(dset_in) < 0)
-                            H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
                     }
                     /*-------------------------------------------------------------------------
                      * We do not have request for filter/chunking; use H5Ocopy instead
@@ -1312,16 +1354,12 @@ do_copy_objects(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
                          * Copy attrs manually
                          *-------------------------------------------------------------------------
                          */
-                        if ((dset_in = H5Dopen2(fidin, travt->objs[i].name, H5P_DEFAULT)) < 0)
-                            H5TOOLS_GOTO_ERROR((-1), "H5Dopen2 failed");
-                        if ((dset_out = H5Dopen2(fidout, travt->objs[i].name, H5P_DEFAULT)) < 0)
-                            H5TOOLS_GOTO_ERROR((-1), "H5Dopen2 failed");
+                        if ((dset_in = ensure_dataset_open(fidin, travt, dsets_in, i)) < 0)
+                            H5TOOLS_GOTO_ERROR((-1), "ensure_dataset_open failed");
+                        if ((dset_out = ensure_dataset_open(fidin, travt, dsets_out, i)) < 0)
+                            H5TOOLS_GOTO_ERROR((-1), "ensure_dataset_open failed");
                         if (copy_attr(dset_in, dset_out, &named_dt_head, travt, options) < 0)
                             H5TOOLS_GOTO_ERROR((-1), "copy_attr failed");
-                        if (H5Dclose(dset_in) < 0)
-                            H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
-                        if (H5Dclose(dset_out) < 0)
-                            H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
 
                         if (options->verbose > 0) {
                             if (options->verbose == 2)
@@ -1488,8 +1526,6 @@ done:
         H5Pclose(gcpl_out);
         H5Pclose(dxpl_id);
         H5Sclose(f_space_id);
-        H5Dclose(dset_in);
-        H5Dclose(dset_out);
         H5Tclose(ftype_id);
         H5Tclose(wtype_id);
         H5Tclose(type_in);
@@ -1505,6 +1541,24 @@ done:
 
     return ret_value;
 } /* end do_copy_objects() */
+
+/*-------------------------------------------------------------------------
+ * Function: ensure_dataset_open
+ *
+ * Purpose: If dataset in the traversal table hasn't been opened yet for
+ * either input or output, do open it and track it in hids[].
+ *-------------------------------------------------------------------------
+ */
+hid_t
+ensure_dataset_open(hid_t fid, trav_table_t *travt, hid_t *hids, unsigned i)
+{
+    hid_t dset_id = hids[i];
+    if (dset_id == H5I_INVALID_HID) {
+        dset_id = H5Dopen2(fid, travt->objs[i].name, H5P_DEFAULT);
+        hids[i] = dset_id;
+    }
+    return dset_id;
+}
 
 /*-------------------------------------------------------------------------
  * Function: print_dataset_info

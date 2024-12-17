@@ -35,7 +35,14 @@ static herr_t update_ref_value(hid_t obj_id, H5R_type_t ref_type, void *ref_in, 
  */
 
 int
-do_copy_refobjs(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *options) /* repack options */
+do_copy_refobjs(
+    hid_t fidin,
+    hid_t fidout,
+    trav_table_t *travt,
+    hid_t *dsets_in,
+    hid_t *dsets_out,
+    pack_opt_t *options  /* repack options */
+)
 {
     hid_t        grp_in   = H5I_INVALID_HID; /* read group ID */
     hid_t        grp_out  = H5I_INVALID_HID; /* write group ID */
@@ -99,8 +106,8 @@ do_copy_refobjs(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
              *-------------------------------------------------------------------------
              */
             case H5TRAV_TYPE_DATASET:
-                if ((dset_in = H5Dopen2(fidin, travt->objs[i].name, H5P_DEFAULT)) < 0)
-                    H5TOOLS_GOTO_ERROR((-1), "H5Dopen2 failed");
+                if ((dset_in = ensure_dataset_open(fidin, travt, dsets_in, i)) < 0)
+                    H5TOOLS_GOTO_ERROR((-1), "ensure_dataset_open failed");
                 if ((space_id = H5Dget_space(dset_in)) < 0)
                     H5TOOLS_GOTO_ERROR((-1), "H5Dget_space failed");
                 if ((ftype_id = H5Dget_type(dset_in)) < 0)
@@ -315,8 +322,8 @@ do_copy_refobjs(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
                      *-------------------------------------------------------------------------
                      */
                     else {
-                        if ((dset_out = H5Dopen2(fidout, travt->objs[i].name, H5P_DEFAULT)) < 0)
-                            H5TOOLS_GOTO_ERROR((-1), "H5Dopen2 failed");
+                        if ((dset_out = ensure_dataset_open(fidout, travt, dsets_out, i)) < 0)
+                            H5TOOLS_GOTO_ERROR((-1), "ensure_dataset_open failed");
                     } /* end else */
 
                     /*-------------------------------------------------------------------------
@@ -335,8 +342,6 @@ do_copy_refobjs(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
                             H5Lcreate_hard(fidout, travt->objs[i].name, H5L_SAME_LOC,
                                            travt->objs[i].links[j].new_name, H5P_DEFAULT, H5P_DEFAULT);
 
-                    if (H5Dclose(dset_out) < 0)
-                        H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
                 } /*can_read*/
 
                 /*-------------------------------------------------------------------------
@@ -351,8 +356,6 @@ do_copy_refobjs(hid_t fidin, hid_t fidout, trav_table_t *travt, pack_opt_t *opti
                     H5TOOLS_GOTO_ERROR((-1), "H5Pclose failed");
                 if (H5Sclose(space_id) < 0)
                     H5TOOLS_GOTO_ERROR((-1), "H5Sclose failed");
-                if (H5Dclose(dset_in) < 0)
-                    H5TOOLS_GOTO_ERROR((-1), "H5Dclose failed");
                 break;
 
             /*-------------------------------------------------------------------------
@@ -400,8 +403,6 @@ done:
         H5Gclose(grp_out);
         H5Pclose(dcpl_id);
         H5Sclose(space_id);
-        H5Dclose(dset_in);
-        H5Dclose(dset_out);
         H5Tclose(ftype_id);
         H5Tclose(mtype_id);
         H5Tclose(type_in);
